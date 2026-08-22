@@ -1,0 +1,24 @@
+{
+  "name": "distributed-job-scheduler-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production-inspired distributed job scheduling platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,worker,web -c blue,magenta,cyan \"npm run dev -w @job-scheduler/api\" \"npm run dev -w @job-scheduler/worker\" \"npm run dev -w @job-scheduler/web\"",
+    "dev:api": "npm run dev -w @job-scheduler/api",
+    "dev:worker": "npm run dev -w @job-scheduler/worker",
+    "dev:web": "npm run dev -w @job-scheduler/web",
+    "build": "npm run build --workspaces --if-present",
+    "type-check": "npm run type-check --workspaces --if-present",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.4.5"
+  }
+}

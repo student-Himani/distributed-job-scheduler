@@ -1,0 +1,8 @@
+export const SYSTEM_CONSTANTS = {
+  APP_NAME: 'Distributed Job Scheduler',
+  VERSION: '1.0.0',
+  DEFAULT_API_PORT: 3001,
+  DEFAULT_WORKER_PORT: 3002,
+  DEFAULT_WEB_PORT: 5173,
+  HEALTH_CHECK_INTERVAL_MS: 10000,
+} as const;
