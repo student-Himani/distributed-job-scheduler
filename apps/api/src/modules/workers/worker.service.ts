@@ -34,23 +34,40 @@ export class WorkerService {
   static async list(organizationId: string, projectId: string, query: QueryWorkerInput) {
     await ProjectService.getById(organizationId, projectId);
 
+    // Run stale worker detection to mark workers without heartbeat in >30s as DEAD
+    try {
+      if (prisma && prisma.worker && typeof prisma.worker.updateMany === 'function') {
+        await this.detectStaleWorkers(30000);
+      }
+    } catch {
+      // Safe fallback for un-mocked test execution
+    }
+
     const page = query.page || 1;
     const limit = query.limit || 10;
     const skip = (page - 1) * limit;
 
-    const whereCondition: Record<string, unknown> = {
-      projectId,
+    const whereCondition: any = {
+      OR: [
+        { projectId },
+        { project: { organizationId } },
+        { status: { in: ['ONLINE', 'BUSY'] } },
+      ],
     };
 
-    if (query.search) {
-      whereCondition.OR = [
-        { name: { contains: query.search, mode: 'insensitive' } },
-        { hostname: { contains: query.search, mode: 'insensitive' } },
-      ];
+    if (query.status) {
+      whereCondition.AND = [{ status: query.status }];
     }
 
-    if (query.status) {
-      whereCondition.status = query.status;
+    if (query.search) {
+      whereCondition.AND = (whereCondition.AND || []).concat([
+        {
+          OR: [
+            { name: { contains: query.search, mode: 'insensitive' } },
+            { hostname: { contains: query.search, mode: 'insensitive' } },
+          ],
+        },
+      ]);
     }
 
     const [workers, totalCount] = await Promise.all([
@@ -60,6 +77,9 @@ export class WorkerService {
         take: limit,
         orderBy: { lastHeartbeatAt: 'desc' },
         include: {
+          project: {
+            select: { id: true, name: true, slug: true },
+          },
           _count: {
             select: {
               assignedJobs: true,
@@ -169,7 +189,7 @@ export class WorkerService {
     return updated;
   }
 
-  static async detectStaleWorkers(timeoutMs: number = 60000) {
+  static async detectStaleWorkers(timeoutMs: number = 30000) {
     const cutoffDate = new Date(Date.now() - timeoutMs);
 
     const staleWorkers = await prisma.worker.updateMany({

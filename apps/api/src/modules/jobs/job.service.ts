@@ -11,23 +11,25 @@ export class JobService {
   static async validateDependenciesAndCycles(projectId: string, targetJobId: string | null, dependsOnJobIds: string[]) {
     if (!dependsOnJobIds || dependsOnJobIds.length === 0) return;
 
+    const uniqueParents = Array.from(new Set(dependsOnJobIds));
+
     // 1. Verify all parent jobs exist within the indicated project
     const parents = await prisma.job.findMany({
       where: {
-        id: { in: dependsOnJobIds },
+        id: { in: uniqueParents },
         projectId,
       },
       select: { id: true, status: true },
     });
 
-    if (parents.length !== dependsOnJobIds.length) {
+    if (parents.length !== uniqueParents.length) {
       const err = new Error('One or more specified parent dependencies do not exist in this project.');
       (err as unknown as { code: string }).code = 'INVALID_DEPENDENCY';
       throw err;
     }
 
-    // 2. DFS Cycle Detection
-    for (const parentId of dependsOnJobIds) {
+    // 2. Cycle Detection via Graph Traversal
+    for (const parentId of uniqueParents) {
       if (targetJobId && parentId === targetJobId) {
         const err = new Error('A job cannot depend on itself.');
         (err as unknown as { code: string }).code = 'CIRCULAR_DEPENDENCY';
@@ -53,6 +55,11 @@ export class JobService {
           });
 
           for (const anc of ancestors) {
+            if (targetJobId && anc.dependsOnJobId === targetJobId) {
+              const err = new Error('Circular dependency detected in job workflow graph.');
+              (err as unknown as { code: string }).code = 'CIRCULAR_DEPENDENCY';
+              throw err;
+            }
             queue.push(anc.dependsOnJobId);
           }
         }
@@ -147,6 +154,35 @@ export class JobService {
           jobId: job.id,
           nextRunAt: scheduledAtDate,
         },
+      });
+    }
+
+    // Publish lifecycle events
+    const { EventService } = await import('../events/event.service');
+    await EventService.publish({
+      eventType: 'JOB_CREATED',
+      jobId: job.id,
+      queueId,
+      projectId,
+      payload: (input.payload || {}) as Record<string, unknown>,
+    });
+
+    if (initialStatus === 'QUEUED') {
+      await EventService.publish({
+        eventType: 'JOB_QUEUED',
+        jobId: job.id,
+        queueId,
+        projectId,
+        payload: (input.payload || {}) as Record<string, unknown>,
+      });
+    } else if (initialStatus === 'SCHEDULED') {
+      await EventService.publish({
+        eventType: 'JOB_SCHEDULED',
+        jobId: job.id,
+        queueId,
+        projectId,
+        payload: (input.payload || {}) as Record<string, unknown>,
+        availableAt: scheduledAtDate || undefined,
       });
     }
 
@@ -387,6 +423,14 @@ export class JobService {
       data: {
         status: 'CANCELLED',
       },
+    });
+
+    const { EventService } = await import('../events/event.service');
+    await EventService.publish({
+      eventType: 'JOB_CANCELLED',
+      jobId: job.id,
+      queueId: job.queueId,
+      projectId: job.projectId,
     });
 
     logger.info(`Job cancelled successfully`, { jobId });

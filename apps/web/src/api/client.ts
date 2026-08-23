@@ -92,6 +92,10 @@ export class ApiClient {
     return this.request(`/queues/${queueId}/resume`, { method: 'POST' });
   }
 
+  static getQueueRateLimit(queueId: string) {
+    return this.request(`/queues/${queueId}/rate-limit`);
+  }
+
   static deleteQueue(queueId: string) {
     return this.request(`/queues/${queueId}`, { method: 'DELETE' });
   }
@@ -176,5 +180,32 @@ export class ApiClient {
 
   static getSystemHealth() {
     return this.request('/metrics/health');
+  }
+
+  // Distributed Lock & Queue Sharding
+  static getJobLock(jobId: string) {
+    return this.request(`/jobs/${jobId}/lock`);
+  }
+
+  static getQueueShard(queueId: string, shardCount: number = 4) {
+    return this.request(`/queues/${queueId}/shard?shardCount=${shardCount}`);
+  }
+
+  static getWorkerShard(workerId: string) {
+    return this.request(`/workers/${workerId}/shard`);
+  }
+
+  // Event-Driven Execution
+  static getEvents(projectId: string, params: { status?: string; limit?: number; offset?: number } = {}) {
+    const query = new URLSearchParams();
+    if (params.status) query.append('status', params.status);
+    if (params.limit) query.append('limit', String(params.limit));
+    if (params.offset) query.append('offset', String(params.offset));
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return this.request(`/projects/${projectId}/events${qs}`);
+  }
+
+  static getEventStats(projectId: string) {
+    return this.request(`/projects/${projectId}/events/stats`);
   }
 }

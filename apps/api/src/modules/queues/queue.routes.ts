@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { QueueController } from './queue.controller';
+import { LockAndShardController } from '../locking/lock.controller';
 import { authenticateToken } from '../../middleware/auth.middleware';
 
 // Router for /api/v1/projects/:projectId/queues
@@ -16,3 +17,5 @@ queueRouter.patch('/:id', QueueController.update);
 queueRouter.delete('/:id', QueueController.delete);
 queueRouter.post('/:id/pause', QueueController.pause);
 queueRouter.post('/:id/resume', QueueController.resume);
+queueRouter.get('/:id/rate-limit', QueueController.getRateLimit);
+queueRouter.get('/:id/shard', LockAndShardController.getQueueShard);

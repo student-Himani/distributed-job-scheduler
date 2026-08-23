@@ -32,6 +32,7 @@ export class QueueService {
         description: input.description,
         priority: input.priority,
         concurrencyLimit: input.concurrencyLimit,
+        rateLimitRpm: input.rateLimitRpm,
         retryPolicyId: input.retryPolicyId,
         projectId,
       },
@@ -141,6 +142,7 @@ export class QueueService {
         ...(input.description !== undefined && { description: input.description }),
         ...(input.priority && { priority: input.priority }),
         ...(input.concurrencyLimit && { concurrencyLimit: input.concurrencyLimit }),
+        ...(input.rateLimitRpm && { rateLimitRpm: input.rateLimitRpm }),
         ...(input.retryPolicyId !== undefined && { retryPolicyId: input.retryPolicyId }),
       },
     });

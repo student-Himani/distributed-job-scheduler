@@ -106,7 +106,7 @@ export const MetricsView: React.FC = () => {
           status={workerHealth.status}
           uptime={workerHealth.uptime}
           icon={<Cpu className="w-5 h-5" />}
-          details={{ activeWorkers: health.workers?.activeWorkers ?? 1 }}
+          details={{ activeWorkers: health.workers?.activeWorkers ?? 0 }}
         />
         <HealthCard
           title="PostgreSQL 16 Engine"

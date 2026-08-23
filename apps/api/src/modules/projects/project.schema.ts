@@ -9,11 +9,13 @@ export const createProjectSchema = z.object({
     .regex(/^[a-z0-9-]+$/, 'Slug must contain only lowercase alphanumeric characters and hyphens')
     .optional(),
   description: z.string().max(500).optional(),
+  rateLimitRpm: z.number().int().min(1, 'Rate limit must be at least 1 request/min').max(100000).default(120),
 });
 
 export const updateProjectSchema = z.object({
   name: z.string().min(2, 'Project name must be at least 2 characters long').max(100).trim().optional(),
   description: z.string().max(500).optional(),
+  rateLimitRpm: z.number().int().min(1).max(100000).optional(),
 });
 
 export const queryProjectSchema = z.object({

@@ -31,7 +31,11 @@ export class MetricsService {
       prisma.job.count({ where: { projectId, status: 'CANCELLED' } }),
       prisma.queue.count({ where: { projectId } }),
       prisma.queue.count({ where: { projectId, isPaused: true } }),
-      prisma.worker.findMany({ where: { projectId } }),
+      prisma.worker.findMany({
+        where: {
+          OR: [{ projectId }, { project: { organizationId } }],
+        },
+      }),
       prisma.deadLetterQueueEntry.count({
         where: { job: { projectId }, status: 'PENDING' },
       }),

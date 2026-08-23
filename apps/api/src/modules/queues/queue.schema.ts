@@ -5,6 +5,7 @@ export const createQueueSchema = z.object({
   description: z.string().max(500).optional(),
   priority: z.enum(['CRITICAL', 'HIGH', 'DEFAULT', 'LOW']).default('DEFAULT'),
   concurrencyLimit: z.number().int().min(1, 'Concurrency limit must be at least 1').max(100, 'Concurrency limit cannot exceed 100').default(10),
+  rateLimitRpm: z.number().int().min(1, 'Rate limit must be at least 1 request/min').max(10000).default(60),
   retryPolicyId: z.string().uuid().optional(),
 });
 
@@ -13,6 +14,7 @@ export const updateQueueSchema = z.object({
   description: z.string().max(500).optional(),
   priority: z.enum(['CRITICAL', 'HIGH', 'DEFAULT', 'LOW']).optional(),
   concurrencyLimit: z.number().int().min(1).max(100).optional(),
+  rateLimitRpm: z.number().int().min(1).max(10000).optional(),
   retryPolicyId: z.string().uuid().nullable().optional(),
 });
 

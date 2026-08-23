@@ -9,6 +9,7 @@ interface ProjectItem {
   slug: string;
   organizationId: string;
   description?: string;
+  rateLimitRpm?: number;
   createdAt: string;
 }
 
@@ -20,6 +21,7 @@ export const ProjectsView: React.FC = () => {
   const [showModal, setShowModal] = useState<boolean>(false);
   const [name, setName] = useState<string>('Payment Gateway Microservice');
   const [description, setDescription] = useState<string>('Stripe and PayPal webhook processing workspace');
+  const [rateLimitRpm, setRateLimitRpm] = useState<number>(120);
 
   const fetchProjectsList = async () => {
     setLoading(true);
@@ -36,7 +38,7 @@ export const ProjectsView: React.FC = () => {
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await ApiClient.createProject({ name, description });
+    const res = await ApiClient.createProject({ name, description, rateLimitRpm });
     if (res.success) {
       setShowModal(false);
       await fetchProjectsList();
@@ -53,7 +55,7 @@ export const ProjectsView: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 font-sans">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
@@ -119,7 +121,12 @@ export const ProjectsView: React.FC = () => {
                   <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.description || 'No description provided.'}</p>
                 </div>
 
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
+                <div className="text-[11px] font-mono text-slate-500 bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex justify-between">
+                  <span>Project Rate Limit:</span>
+                  <span className="font-bold text-slate-900">{p.rateLimitRpm || 120} RPM</span>
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                   <button
                     onClick={() => setActiveProject(p)}
                     disabled={isActive}
@@ -167,6 +174,18 @@ export const ProjectsView: React.FC = () => {
                   type="text"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Project Rate Limit (Requests / min)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100000"
+                  value={rateLimitRpm}
+                  onChange={(e) => setRateLimitRpm(parseInt(e.target.value, 10))}
                   className="w-full px-3 py-2 text-sm rounded-xl border border-slate-200"
                 />
               </div>

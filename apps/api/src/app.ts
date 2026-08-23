@@ -21,6 +21,7 @@ import {
   scheduleRouter,
 } from './modules/scheduling/schedule.routes';
 import { systemMetricsRouter, projectMetricsRouter } from './modules/metrics/metrics.routes';
+import { projectEventRouter, eventRouter } from './modules/events/event.routes';
 
 export const app = express();
 
@@ -32,9 +33,13 @@ app.use('/api/v1', healthRouter);
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/organizations', organizationRouter);
 
-// Metrics & Health Routes
+// Metrics Routes
 app.use('/api/v1/metrics', systemMetricsRouter);
 app.use('/api/v1/projects/:projectId/metrics', projectMetricsRouter);
+
+// Event Routes
+app.use('/api/v1/projects/:projectId/events', projectEventRouter);
+app.use('/api/v1/events', eventRouter);
 
 // Retry Policies Routes
 app.use('/api/v1/retry-policies', retryPolicyRouter);

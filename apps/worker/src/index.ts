@@ -3,16 +3,23 @@ import { env } from './config/env';
 import { checkDatabaseHealth } from './db/client';
 import { Logger, ServiceHealth, SYSTEM_CONSTANTS, ApiResponse } from '@job-scheduler/shared';
 import { WorkerDaemonPoller } from './poller';
+import { WorkerEventConsumer } from './event-consumer';
 
 const logger = new Logger('Worker:Daemon');
 const startTime = Date.now();
 const poller = new WorkerDaemonPoller();
+const eventConsumer = new WorkerEventConsumer(env.WORKER_ID);
 
 logger.info(`Starting standalone Worker process daemon [ID: ${env.WORKER_ID}]...`);
 
 // 1. Start worker daemon poller
 poller.start().catch((err) => {
   logger.error(`Fatal error starting worker poller`, { error: err instanceof Error ? err.message : String(err) });
+});
+
+// 2. Start worker event consumer daemon
+eventConsumer.start().catch((err) => {
+  logger.error(`Fatal error starting event consumer`, { error: err instanceof Error ? err.message : String(err) });
 });
 
 // 2. Worker internal express server for health checks
@@ -62,6 +69,7 @@ const server = app.listen(env.PORT, () => {
 
 const gracefulShutdown = async (signal: string) => {
   logger.info(`Received ${signal}. Shutting down worker process gracefully...`);
+  eventConsumer.stop();
   await poller.stop();
   server.close(() => {
     logger.info(`Worker ${env.WORKER_ID} daemon stopped.`);

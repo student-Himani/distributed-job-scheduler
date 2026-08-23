@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClient } from '../api/client';
+import { WebSocketClient, ConnectionState } from '../api/websocket';
 import { useAuth } from '../context/AuthContext';
 import {
   Clock,
@@ -11,6 +12,7 @@ import {
   Folder,
   ArrowRight,
   TrendingUp,
+  Radio,
 } from 'lucide-react';
 
 interface MetricsData {
@@ -104,10 +106,32 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
     setLoading(false);
   };
 
+  const [wsStatus, setWsStatus] = useState<ConnectionState>('DISCONNECTED');
+
   useEffect(() => {
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 3000);
-    return () => clearInterval(interval);
+
+    const token = localStorage.getItem('token') || undefined;
+    const wsClient = WebSocketClient.getInstance();
+    wsClient.connect(token);
+
+    if (activeProject) {
+      wsClient.subscribeToProject(activeProject.id);
+    }
+
+    const unsubStatus = wsClient.onStatusChange(setWsStatus);
+    const unsubMsg = wsClient.onMessage((msg) => {
+      if (msg.type === 'job.updated') {
+        fetchMetrics();
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubStatus();
+      unsubMsg();
+    };
   }, [activeProject]);
 
   if (!activeProject) {
@@ -154,13 +178,29 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-0.5">Dashboard</h1>
         </div>
 
-        <button
-          onClick={fetchMetrics}
-          className="p-2.5 rounded-2xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm flex items-center space-x-2 text-xs font-bold"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center space-x-3">
+          <span className={`inline-flex items-center px-3 py-1.5 rounded-2xl text-xs font-bold border transition-all ${
+            wsStatus === 'CONNECTED' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+            wsStatus === 'RECONNECTING' || wsStatus === 'CONNECTING' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+            'bg-slate-100 text-slate-600 border-slate-200'
+          }`}>
+            <span className={`w-2 h-2 rounded-full mr-2 ${
+              wsStatus === 'CONNECTED' ? 'bg-emerald-500 animate-ping' :
+              wsStatus === 'RECONNECTING' || wsStatus === 'CONNECTING' ? 'bg-amber-500 animate-pulse' :
+              'bg-slate-400'
+            }`} />
+            <Radio className="w-3.5 h-3.5 mr-1" />
+            <span>Live Updates: {wsStatus}</span>
+          </span>
+
+          <button
+            onClick={fetchMetrics}
+            className="p-2.5 rounded-2xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm flex items-center space-x-2 text-xs font-bold"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-600' : ''}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards Grid */}

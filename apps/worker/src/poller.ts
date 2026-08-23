@@ -1,6 +1,8 @@
 import { prisma } from './db/client';
 import { env } from './config/env';
 import { Logger } from '@job-scheduler/shared';
+import { QueueShardingService } from './services/queue-sharding.service';
+import { DistributedLockService } from './services/distributed-lock.service';
 import { JobExecutor } from './executor';
 import os from 'os';
 
@@ -93,7 +95,7 @@ export class WorkerDaemonPoller {
 
   private async resolveProjectWorkspace() {
     let project = await prisma.project.findFirst({
-      orderBy: { createdAt: 'asc' },
+      orderBy: { updatedAt: 'desc' },
     });
 
     if (!project) {
@@ -124,12 +126,26 @@ export class WorkerDaemonPoller {
       const now = new Date();
       const cpuUsage = Math.floor(Math.random() * 15) + 5;
       const memoryUsageMb = Math.floor(Math.random() * 50) + 120; // MB
+      const activeJobsCount = executor.activeJobs;
+
+      const currentWorker = await prisma.worker.findUnique({
+        where: { id: this.workerId },
+        select: { status: true },
+      });
+
+      const nextStatus =
+        currentWorker?.status === 'DRAINING'
+          ? 'DRAINING'
+          : activeJobsCount > 0
+          ? 'BUSY'
+          : 'ONLINE';
 
       await prisma.worker.update({
         where: { id: this.workerId },
         data: {
           lastHeartbeatAt: now,
-          status: executor.activeJobs >= 10 ? 'BUSY' : 'ONLINE',
+          status: nextStatus,
+          currentConcurrency: activeJobsCount,
         },
       });
 
@@ -138,7 +154,7 @@ export class WorkerDaemonPoller {
           workerId: this.workerId,
           cpuUsage,
           memoryUsageMb,
-          activeJobs: executor.activeJobs,
+          activeJobs: activeJobsCount,
         },
       });
     } catch (err) {
@@ -174,26 +190,82 @@ export class WorkerDaemonPoller {
 
           if (allParentsCompleted) {
             await prisma.$transaction(async (tx) => {
-              await tx.job.update({
-                where: { id: childJobId },
+              const updatedResult = await tx.job.updateMany({
+                where: { id: childJobId, status: 'BLOCKED' },
                 data: { status: 'QUEUED' },
               });
 
-              await tx.jobLog.create({
-                data: {
+              if (updatedResult.count > 0) {
+                await tx.jobLog.create({
+                  data: {
+                    jobId: childJobId,
+                    level: 'INFO',
+                    message: 'DAG dependency unblocked: All prerequisite parent jobs completed successfully.',
+                  },
+                });
+                const { EventService } = await import('./services/event.service');
+                await EventService.publish({
+                  eventType: 'JOB_DEPENDENCY_SATISFIED',
                   jobId: childJobId,
-                  level: 'INFO',
-                  message: 'DAG dependency unblocked: All prerequisite parent jobs completed successfully.',
-                },
-              });
+                  queueId: childJob.queueId,
+                  projectId: childJob.projectId,
+                }, tx);
+                await EventService.publish({
+                  eventType: 'JOB_QUEUED',
+                  jobId: childJobId,
+                  queueId: childJob.queueId,
+                  projectId: childJob.projectId,
+                }, tx);
+                logger.info(`DAG UNBLOCKED JOB [Child Job ID: ${childJob.id}, Name: ${childJob.name}] -> QUEUED`);
+              }
             });
-
-            logger.info(`DAG UNBLOCKED JOB [Child Job ID: ${childJob.id}, Name: ${childJob.name}] -> QUEUED`);
           }
         }
       }
     } catch (err) {
       logger.error('Error checking DAG child dependencies', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private async handleFailedParentJob(failedJobId: string, errorMsg: string): Promise<void> {
+    try {
+      const dependentEdges = await prisma.jobDependency.findMany({
+        where: { dependsOnJobId: failedJobId },
+        select: { jobId: true },
+      });
+
+      for (const edge of dependentEdges) {
+        const childJobId = edge.jobId;
+        const childJob = await prisma.job.findUnique({
+          where: { id: childJobId },
+        });
+
+        if (childJob && childJob.status === 'BLOCKED') {
+          await prisma.$transaction(async (tx) => {
+            const updateResult = await tx.job.updateMany({
+              where: { id: childJobId, status: 'BLOCKED' },
+              data: {
+                status: 'FAILED',
+                failedAt: new Date(),
+                errorDetails: { message: `Prerequisite parent job failed: ${errorMsg}` },
+              },
+            });
+
+            if (updateResult.count > 0) {
+              await tx.jobLog.create({
+                data: {
+                  jobId: childJobId,
+                  level: 'ERROR',
+                  message: `DAG prerequisite failed: Parent job [${failedJobId}] moved to terminal failure state.`,
+                },
+              });
+              logger.warn(`DAG BLOCKED JOB [Child Job ID: ${childJob.id}] -> FAILED due to prerequisite failure`);
+            }
+          });
+        }
+      }
+    } catch (err) {
+      logger.error('Error handling DAG failed parent dependencies', { error: err instanceof Error ? err.message : String(err) });
     }
   }
 
@@ -216,9 +288,14 @@ export class WorkerDaemonPoller {
 
       if (queues.length === 0) return;
 
+      // Filter queues according to WORKER_SHARD_ID and QUEUE_SHARD_COUNT
+      const shardedQueues = QueueShardingService.filterQueuesForWorker(queues, env.WORKER_SHARD_ID, env.QUEUE_SHARD_COUNT);
+
+      if (shardedQueues.length === 0) return;
+
       // Filter eligible queues under concurrency limits
       const eligibleQueueIds: string[] = [];
-      for (const q of queues) {
+      for (const q of shardedQueues) {
         const activeCount = await prisma.job.count({
           where: {
             queueId: q.id,
@@ -258,8 +335,16 @@ export class WorkerDaemonPoller {
         return a.createdAt.getTime() - b.createdAt.getTime();
       });
 
-      // 4. Attempt atomic claim on top candidate
+      // 4. Attempt atomic claim on top candidate with Distributed Locking
       for (const candidate of candidateJobs) {
+        const lockResource = `job:lock:${candidate.id}`;
+        const lockRes = await DistributedLockService.acquire(lockResource, this.workerId, 30000);
+
+        if (!lockRes.acquired) {
+          logger.info(`Skipped job claim [${candidate.id}] - lock owned by competing worker node`, { workerId: this.workerId });
+          continue;
+        }
+
         const claimedJob = await prisma.$transaction(async (tx) => {
           const claimResult = await tx.job.updateMany({
             where: {
@@ -309,7 +394,10 @@ export class WorkerDaemonPoller {
           return candidate;
         });
 
-        if (claimedJob) {
+        if (!claimedJob) {
+          // Release lock if atomic update count was 0
+          await DistributedLockService.release(lockResource, this.workerId);
+        } else {
           logger.info(`JOB QUEUED -> CLAIMED -> RUNNING [Job ID: ${claimedJob.id}, Project ID: ${claimedJob.projectId}] (Queue: ${claimedJob.queue.name})`);
           
           // Execute asynchronously
@@ -393,6 +481,14 @@ export class WorkerDaemonPoller {
             metadata: { durationMs: executionResult.durationMs },
           },
         });
+
+        const { EventService } = await import('./services/event.service');
+        await EventService.publish({
+          eventType: 'JOB_COMPLETED',
+          jobId: job.id,
+          projectId: job.projectId,
+          payload: { durationMs: executionResult.durationMs, result: executionResult.result },
+        }, tx);
       });
 
       logger.info(`JOB RUNNING -> COMPLETED [Job ID: ${job.id}, Project ID: ${job.projectId}] (Duration: ${executionResult.durationMs}ms)`);
@@ -425,6 +521,8 @@ export class WorkerDaemonPoller {
           data: { currentConcurrency: { decrement: 1 } },
         });
 
+        const { EventService } = await import('./services/event.service');
+
         if (isRetriable) {
           const nextAttempt = job.retryCount + 1;
           const delayMs = Math.min(30000, 2000 * Math.pow(2, job.retryCount));
@@ -447,6 +545,14 @@ export class WorkerDaemonPoller {
               message: `Job failed (Attempt ${nextAttempt}/${job.maxRetries}). Re-scheduled for retry in ${delayMs}ms`,
             },
           });
+
+          await EventService.publish({
+            eventType: 'JOB_RETRY',
+            jobId: job.id,
+            projectId: job.projectId,
+            availableAt: nextRunAt,
+            payload: { attempt: nextAttempt, error: errorMsg, delayMs },
+          }, tx);
 
           logger.warn(`JOB FAILED -> RETRY SCHEDULED [Job ID: ${job.id}, Project ID: ${job.projectId}] (Attempt ${nextAttempt}/${job.maxRetries})`);
         } else {
@@ -478,9 +584,34 @@ export class WorkerDaemonPoller {
             },
           });
 
+          await EventService.publish({
+            eventType: 'JOB_FAILED',
+            jobId: job.id,
+            projectId: job.projectId,
+            payload: { error: errorMsg, attempts: job.retryCount + 1 },
+          }, tx);
+
+          await EventService.publish({
+            eventType: 'JOB_DEAD_LETTERED',
+            jobId: job.id,
+            projectId: job.projectId,
+            payload: { reason: errorMsg },
+          }, tx);
+
           logger.warn(`JOB FAILED -> MOVED TO DLQ [Job ID: ${job.id}, Project ID: ${job.projectId}]`);
         }
       });
+
+      if (!isRetriable) {
+        await this.handleFailedParentJob(job.id, errorMsg);
+      }
+    }
+
+    // Release distributed lock after completion or failure
+    try {
+      await DistributedLockService.release(`job:lock:${job.id}`, this.workerId);
+    } catch {
+      // Ignore lock cleanup error
     }
   }
 }

@@ -37,6 +37,7 @@ export class ProjectService {
         name: input.name,
         slug,
         description: input.description,
+        rateLimitRpm: input.rateLimitRpm,
         organizationId,
       },
     });
@@ -132,6 +133,7 @@ export class ProjectService {
       data: {
         ...(input.name && { name: input.name }),
         ...(input.description !== undefined && { description: input.description }),
+        ...(input.rateLimitRpm && { rateLimitRpm: input.rateLimitRpm }),
       },
     });
 

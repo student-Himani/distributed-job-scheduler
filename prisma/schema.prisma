@@ -118,6 +118,7 @@ model Project {
   slug           String
   description    String?
   apiKey         String       @unique @default(uuid())
+  rateLimitRpm   Int          @default(120)
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   queues         Queue[]
@@ -150,6 +151,7 @@ model Queue {
   description      String?
   priority         QueuePriority @default(DEFAULT)
   concurrencyLimit Int           @default(10)
+  rateLimitRpm     Int           @default(60)
   isPaused         Boolean       @default(false)
   projectId        String
   project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -162,6 +164,18 @@ model Queue {
   @@unique([projectId, name])
   @@index([projectId])
   @@index([isPaused, priority])
+}
+
+model RateLimitRecord {
+  id          String   @id @default(uuid())
+  key         String
+  count       Int      @default(1)
+  windowStart DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, windowStart])
+  @@index([key, windowStart])
 }
 
 model Job {
@@ -320,5 +334,61 @@ model DeadLetterQueueEntry {
   updatedAt        DateTime  @updatedAt
 
   @@index([status])
+  @@index([createdAt])
+}
+
+model DistributedLock {
+  id         String   @id @default(uuid())
+  resource   String   @unique
+  workerId   String
+  acquiredAt DateTime @default(now())
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([resource, expiresAt])
+  @@index([workerId])
+}
+
+enum EventStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum JobEventType {
+  JOB_CREATED
+  JOB_QUEUED
+  JOB_SCHEDULED
+  JOB_RETRY
+  JOB_CANCELLED
+  JOB_COMPLETED
+  JOB_FAILED
+  JOB_DEAD_LETTERED
+  JOB_DEPENDENCY_SATISFIED
+}
+
+model JobEvent {
+  id          String       @id @default(uuid())
+  eventType   JobEventType
+  jobId       String?
+  queueId     String?
+  projectId   String?
+  payload     Json?
+  status      EventStatus  @default(PENDING)
+  attempts    Int          @default(0)
+  maxAttempts Int          @default(5)
+  availableAt DateTime     @default(now())
+  processedAt DateTime?
+  lastError   String?
+  workerId    String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([status, availableAt])
+  @@index([jobId])
+  @@index([queueId])
+  @@index([projectId])
   @@index([createdAt])
 }

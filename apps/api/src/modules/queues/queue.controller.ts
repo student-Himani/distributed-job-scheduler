@@ -460,4 +460,42 @@ export class QueueController {
       return res.status(500).json(response);
     }
   }
+
+  static async getRateLimit(req: AuthenticatedRequest, res: Response) {
+    try {
+      const organizationId = req.user?.organizationId;
+      const queueId = req.params.id;
+
+      if (!organizationId) {
+        const response: ApiResponse = {
+          success: false,
+          error: {
+            code: 'UNAUTHORIZED',
+            message: 'User organization context is missing.',
+          },
+        };
+        return res.status(401).json(response);
+      }
+
+      const queue = await QueueService.getById(organizationId, queueId);
+      const limit = queue.rateLimitRpm || 60;
+      const { RateLimiterService } = await import('../rate-limiting/rate-limiter.service');
+      const status = await RateLimiterService.getStatus(`queue:${queueId}`, limit);
+
+      const response: ApiResponse<typeof status> = {
+        success: true,
+        data: status,
+      };
+      return res.status(200).json(response);
+    } catch (err: unknown) {
+      const response: ApiResponse = {
+        success: false,
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : 'Failed to fetch rate limit status.',
+        },
+      };
+      return res.status(500).json(response);
+    }
+  }
 }

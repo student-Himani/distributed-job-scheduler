@@ -101,8 +101,17 @@ export class ClaimingService {
       return a.createdAt.getTime() - b.createdAt.getTime(); // Earliest created first
     });
 
-    // 5. Transactional Atomic Claim Loop
+    // 5. Transactional Atomic Claim Loop with Distributed Locking
     for (const candidate of candidateJobs) {
+      const lockResource = `job:lock:${candidate.id}`;
+      const { DistributedLockService } = await import('../locking/distributed-lock.service');
+      const lockRes = await DistributedLockService.acquire(lockResource, worker.id, 30000);
+
+      if (!lockRes.acquired) {
+        logger.info(`Skipped candidate job claim [${candidate.id}] - lock active by another worker`, { workerId: worker.id });
+        continue;
+      }
+
       const claimedJob = await prisma.$transaction(async (tx) => {
         // Atomic update checking status in ['QUEUED', 'SCHEDULED']
         const updateResult = await tx.job.updateMany({
@@ -157,8 +166,11 @@ export class ClaimingService {
         });
       });
 
-      if (claimedJob) {
-        logger.info(`Job claimed atomically`, { jobId: claimedJob.id, workerId: worker.id });
+      if (!claimedJob) {
+        // Release lock if atomic claim update count was 0
+        await DistributedLockService.release(lockResource, worker.id);
+      } else {
+        logger.info(`Job claimed atomically with distributed lock`, { jobId: claimedJob.id, workerId: worker.id });
         return {
           claimed: true,
           job: claimedJob,
