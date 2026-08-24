@@ -1,3 +1,10 @@
+
+# Distributed Job Scheduler
+
+🚀 **Live Application: https://distributed-job-scheduler-five.vercel.app
+
+📦 **GitHub Repository: https://github.com/student-Himani/distributed-job-scheduler
+
 # Distributed Job Scheduler Monorepo
 
 An enterprise-grade, distributed background job processing engine built with Node.js, Express, TypeScript, Prisma ORM, PostgreSQL 16, and React (Vite, TailwindCSS, Lucide Icons).
