@@ -1,9 +1,8 @@
 
 # Distributed Job Scheduler
 
-🚀 **Live Application: https://distributed-job-scheduler-five.vercel.app
+🚀 Live Application: https://distributed-job-scheduler-five.vercel.app
 
-📦 **GitHub Repository: https://github.com/student-Himani/distributed-job-scheduler
 
 # Distributed Job Scheduler Monorepo
 
